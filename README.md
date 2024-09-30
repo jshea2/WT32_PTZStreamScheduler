@@ -1,6 +1,7 @@
 # WT32-ETH01 Stream Scheduler for Panasonic PTZ
 
 This uses the WT32-ETH01 to trigger a scheduled start and stop stream command to Panasonic PTZ via HTTP Request.
+![Screenshot 2024-07-09 at 6 42 03 PM](https://github.com/user-attachments/assets/322cab7b-d305-4fa1-a72b-e927bb871003)
 
 Features:
 - Webpage server for updating configuration
