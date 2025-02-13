@@ -17,7 +17,7 @@ String globalCurrentDate = "";
 int    globalRtmpStatus = -1;        // -1 indicates error/unavailable
 bool   globalInternetConnected = false;
 bool   globalNtpUpdated = false;
-bool   globalDesiredStream = false;  // True if an event window is active
+bool   globalDesiredStream = false;  // True if any event window is active
 
 // ----- Ethernet & Hardware Definitions -----
 #define ETH_ADDR        1
@@ -36,10 +36,11 @@ IPAddress dns2(8, 8, 4, 4);
 // ----- Global Objects -----
 AsyncWebServer server(80);
 WiFiUDP ntpUDP;
-// 60-second update interval
+// Update interval: 60 seconds
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 60000);
 
 // ----- Timezone Definitions -----
+// We'll use the Timezone library to convert UTC to local time.
 TimeChangeRule usPDT = {"PDT", Second, Sun, Mar, 2, -420}; // PDT = UTC - 7 hours
 TimeChangeRule usPST = {"PST", First, Sun, Nov, 2, -480};   // PST = UTC - 8 hours
 Timezone usPacific(usPDT, usPST);
@@ -52,12 +53,11 @@ struct Event {
 };
 
 String ptzCameraIP = "10.0.3.61";
-// No longer using separate flags for start/stop commands.
+// We now rely on globalDesiredStream rather than separate start/stop flags.
 std::vector<Event> events;
 bool daylightSavingTime = false; // Stored in settings
 
 // ----- Utility Functions -----
-
 // Returns formatted time "HH:MM"
 String getFormattedTime(time_t rawTime) {
   char timeStr[6];
@@ -126,7 +126,7 @@ bool checkInternetConnectivity() {
 // Connect and configure Ethernet (blocking until connected)
 void connectEthernet() {
   unsigned long startTime = millis();
-  const unsigned long timeout = 60000;
+  const unsigned long timeout = 60000; // 1-minute timeout
   while (true) {
     if (ETH.linkUp() && ETH.localIP() != IPAddress(0, 0, 0, 0)) {
       Serial.println("\nEthernet connected");
@@ -205,23 +205,23 @@ void loadSettings() {
 }
 
 // ----- PTZ Control Task -----
-// Runs on core 1: Checks events, RTMP status, and updates global status variables.
+// Runs on core 1: Updates global status and performs event and RTMP checks.
 void ptzControlTask(void * parameter) {
   static unsigned long lastEventCheckTime = 0;
   static unsigned long lastRTMPCheckTime = 0;
   for (;;) {
     unsigned long currentMillis = millis();
     
-    // Update global time and connectivity status.
+    // Update NTP time before reading.
+    timeClient.update();
     time_t rawTime = timeClient.getEpochTime();
     time_t localTime = usPacific.toLocal(rawTime);
     globalCurrentTime = getFormattedTime(localTime);
     globalCurrentDate = getFormattedDate(localTime);
     globalInternetConnected = checkInternetConnectivity();
-    // Assume NTP was updated in setup.
-    globalNtpUpdated = true;
+    globalNtpUpdated = true; // Assume updated successfully in setup
     
-    // Event Check (every 60 seconds):
+    // Event Check (every 60 seconds)
     if (currentMillis - lastEventCheckTime >= 60000) {
       int currentTotalMinutes = hour(localTime) * 60 + minute(localTime);
       bool desired = false;
@@ -243,7 +243,7 @@ void ptzControlTask(void * parameter) {
       lastEventCheckTime = currentMillis;
     }
     
-    // RTMP Status Check (every 4 seconds):
+    // RTMP Status Check (every 4 seconds)
     if (currentMillis - lastRTMPCheckTime >= 4000) {
       globalRtmpStatus = getRTMPStatus(ptzCameraIP);
       if (globalDesiredStream && globalRtmpStatus != 1) {
@@ -484,7 +484,7 @@ void setup() {
 }
 
 // ----- Main Loop -----
-// With the PTZ control task on core 1 and async web server on core 0,
+// With the dedicated PTZ control task running on core 1 and the async web server on core 0,
 // the main loop simply yields.
 void loop() {
   vTaskDelay(1000 / portTICK_PERIOD_MS);
